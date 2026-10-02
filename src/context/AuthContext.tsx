@@ -47,9 +47,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })();
     });
 
+    const refreshInterval = setInterval(() => {
+      void supabase.auth.getSession().then(({ data }) => {
+        if (!mounted) return;
+        if (data.session) setSession(data.session);
+      });
+    }, 5 * 60 * 1000);
+
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
+      clearInterval(refreshInterval);
     };
   }, []);
 

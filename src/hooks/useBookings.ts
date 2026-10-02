@@ -50,15 +50,24 @@ export function useAllBookings() {
 
 export function useNewBookingsCount() {
   const [count, setCount] = useState(0);
-  useEffect(() => {
-    const fetchCount = () => {
-      void supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('seen_by_admin', false).then(({ count: next }) => setCount(next ?? 0));
-    };
-    fetchCount();
-    const channel = supabase.channel('new-bookings-count').on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, fetchCount).subscribe();
-    return () => { void supabase.removeChannel(channel); };
+
+  const fetchCount = useCallback(() => {
+    void supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('seen_by_admin', false).then(({ count: next }) => setCount(next ?? 0));
   }, []);
-  return count;
+
+  useEffect(() => {
+    fetchCount();
+    const channel = supabase.channel('new-bookings-count').on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchCount()).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [fetchCount]);
+
+  const markAllSeen = useCallback(async () => {
+    setCount(0);
+    await supabase.from('bookings').update({ seen_by_admin: true }).eq('seen_by_admin', false);
+    fetchCount();
+  }, [fetchCount]);
+
+  return { count, markAllSeen };
 }
 
 export function useMyBookings(userId: string | null) {

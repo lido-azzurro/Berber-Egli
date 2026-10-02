@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Scissors, Lock, Mail, ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import PasswordInput from './PasswordInput';
 
 type Props = {
   onBack: () => void;
@@ -64,8 +65,7 @@ export default function AdminLogin({ onBack }: Props) {
               <Lock className="w-4 h-4 text-gold" />
               Fjalëkalimi
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"

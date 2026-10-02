@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, Clock, User, Phone, FileText, Check, Loader2, AlertCircle, Calendar as CalIcon, Scissors } from 'lucide-react';
+import { ChevronLeft, Clock, User, Phone, FileText, Check, Loader2, AlertCircle, Calendar as CalIcon, Scissors, CheckCircle2 } from 'lucide-react';
 import CalendarPicker from './CalendarPicker';
 import { ALL_SLOTS, WORKING_LABEL_AL, type SlotKind } from '@/lib/slots';
 import { useBookedSlots } from '@/hooks/useBookings';
 import { supabase, SERVICES, type ServiceType } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { isSlotInPast } from '@/lib/timeFilter';
+import { isValidAlbanianPhone, formatAlbanianPhone } from '@/lib/phone';
 
 const MONTHS_AL = [
   'Janar', 'Shkurt', 'Mars', 'Prill', 'Maj', 'Qershor',
@@ -23,7 +25,7 @@ export default function BookingFlow({ onBack }: Props) {
   const [step, setStep] = useState<Step>('calendar');
   const [dateISO, setDateISO] = useState<string | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [selectedService, setSelectedService] = useState<ServiceType>('Qethje');
+  const [selectedServices, setSelectedServices] = useState<ServiceType[]>([]);
   const [extraSlots, setExtraSlots] = useState<string[]>([]);
   const { session, profile } = useAuth();
   const { bookedTimes, loading } = useBookedSlots(dateISO);
@@ -31,6 +33,7 @@ export default function BookingFlow({ onBack }: Props) {
   // form state
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +52,17 @@ export default function BookingFlow({ onBack }: Props) {
     });
   }, [dateISO]);
 
+  const totalPrice = selectedServices.reduce((sum, name) => {
+    const svc = SERVICES.find((s) => s.name === name);
+    return sum + (svc?.priceValue ?? 0);
+  }, 0);
+
+  const toggleService = (name: ServiceType) => {
+    setSelectedServices((prev) =>
+      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+    );
+  };
+
   const handleDateSelect = (iso: string) => {
     setDateISO(iso);
     setStep('slots');
@@ -59,6 +73,14 @@ export default function BookingFlow({ onBack }: Props) {
     setStep('service');
   };
 
+  const handlePhoneBlur = () => {
+    if (phone && !isValidAlbanianPhone(phone)) {
+      setPhoneError('Numri i telefonit nuk është i vlefshëm shqiptar.');
+    } else {
+      setPhoneError(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dateISO || !selectedTime) return;
@@ -66,17 +88,32 @@ export default function BookingFlow({ onBack }: Props) {
       setError('Ju lutemi plotësoni emrin dhe numrin e telefonit.');
       return;
     }
+    if (!isValidAlbanianPhone(phone)) {
+      setError('Numri i telefonit nuk është i vlefshëm. Psh: +355 69 123 4567');
+      return;
+    }
+    if (selectedServices.length === 0) {
+      setError('Zgjidh të paktën një shërbim.');
+      setStep('service');
+      return;
+    }
     setSubmitting(true);
     setError(null);
+
+    const primaryService = selectedServices[0];
+    const serviceList = selectedServices.join(', ');
+    const notesWithServices = notes.trim()
+      ? `${serviceList}${notes.trim() ? ` — ${notes.trim()}` : ''}`
+      : serviceList;
 
     const { error: insertError } = await supabase.from('bookings').insert({
       booking_date: dateISO,
       slot_time: selectedTime,
       client_full_name: fullName.trim(),
       client_phone: phone.trim(),
-      notes: notes.trim() || null,
+      notes: notesWithServices,
       source: 'online',
-      service: selectedService,
+      service: primaryService,
       user_id: session?.user.id ?? null,
     });
 
@@ -92,15 +129,34 @@ export default function BookingFlow({ onBack }: Props) {
       return;
     }
 
+    void triggerPushNotification(fullName.trim(), selectedTime, dateISO, serviceList);
+
     setStep('confirm');
+  };
+
+  const triggerPushNotification = async (clientName: string, slot: string, date: string, svc: string) => {
+    try {
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push-notification`;
+      await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ clientName, slotTime: slot, bookingDate: date, service: svc }),
+      });
+    } catch {
+      // push notification is best-effort; don't block booking confirmation
+    }
   };
 
   const handleRestart = () => {
     setDateISO(null);
     setSelectedTime(null);
-    setSelectedService('Qethje');
+    setSelectedServices([]);
     setFullName('');
     setPhone('');
+    setPhoneError(null);
     setNotes('');
     setError(null);
     setStep('calendar');
@@ -137,7 +193,8 @@ export default function BookingFlow({ onBack }: Props) {
           {slots.map((slot) => {
             const isBreak = slot.kind === 'break';
             const isBooked = bookedTimes.has(slot.time);
-            const disabled = isBreak || isBooked || loading;
+            const isPast = dateISO ? isSlotInPast(dateISO, slot.time) : false;
+            const disabled = isBreak || isBooked || isPast || loading;
             return (
               <button
                 key={slot.time}
@@ -149,7 +206,9 @@ export default function BookingFlow({ onBack }: Props) {
                     ? 'bg-[#0d0d0d] border-[#1a1a1a] text-neutral-700 cursor-not-allowed'
                     : isBooked
                       ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-600 cursor-not-allowed line-through'
-                      : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37] hover:text-gold active:scale-95'
+                      : isPast
+                        ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-600 cursor-not-allowed line-through opacity-50'
+                        : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37] hover:text-gold active:scale-95'
                   }
                 `}
               >
@@ -226,22 +285,24 @@ export default function BookingFlow({ onBack }: Props) {
                 {extraSlots.length > 0 && (
                   <div className="mb-2">
                     <div className="flex items-center gap-2 mb-3"><span className="text-xs font-semibold tracking-[0.2em] uppercase text-gold">Orar shtesë</span><span className="text-[10px] text-neutral-500">Sipas kërkesës së berberit</span></div>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{extraSlots.map((time) => <button key={time} onClick={() => !bookedTimes.has(time) && handleSlotSelect(time)} disabled={bookedTimes.has(time)} className={`py-3 rounded-xl text-sm font-medium border ${bookedTimes.has(time) ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-600 line-through' : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37] hover:text-gold'}`}>{time}</button>)}</div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{extraSlots.map((time) => { const isBooked = bookedTimes.has(time); const isPast = dateISO ? isSlotInPast(dateISO, time) : false; const disabled = isBooked || isPast; return <button key={time} onClick={() => !disabled && handleSlotSelect(time)} disabled={disabled} className={`py-3 rounded-xl text-sm font-medium border ${isBooked ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-600 line-through' : isPast ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-600 line-through opacity-50' : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37] hover:text-gold'}`}>{time}</button>; })}</div>
                   </div>
                 )}
               </div>
             )}
 
-            <p className="mt-4 text-xs text-neutral-500 flex items-center gap-2">
+            <p className="mt-4 text-xs text-neutral-500 flex items-center gap-2 flex-wrap">
               <span className="inline-block w-3 h-3 rounded bg-[#1a1a1a] border border-[#2a2a2a]" />
               I rezervuar
               <span className="inline-block w-3 h-3 rounded bg-[#0d0d0d] border border-[#1a1a1a] ml-3" />
               Pushim
+              <span className="inline-block w-3 h-3 rounded bg-[#1a1a1a] border border-[#2a2a2a] opacity-50 ml-3" />
+              Kaluar
             </p>
           </div>
         )}
 
-        {/* Step: Service */}
+        {/* Step: Service — Multiple selection with checkboxes */}
         {step === 'service' && (
           <div className="animate-fade-in">
             <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-4 mb-5 flex items-center gap-3">
@@ -251,33 +312,55 @@ export default function BookingFlow({ onBack }: Props) {
               </div>
             </div>
 
+            <p className="text-sm text-neutral-400 mb-4">Zgjidh një ose disa shërbime. Mund të bashkoni sa të dëshironi.</p>
+
             <div className="space-y-3">
-              {SERVICES.map((s) => (
-                <button
-                  key={s.name}
-                  onClick={() => {
-                    setSelectedService(s.name);
-                    setStep('form');
-                  }}
-                  className={`w-full flex items-center gap-4 p-5 rounded-2xl border transition-all text-left active:scale-[0.98] ${
-                    selectedService === s.name
-                      ? 'border-[#d4af37] bg-[#d4af37]/5 gold-glow'
-                      : 'border-[#2a2a2a] bg-[#141414] hover:border-[#d4af37]/50'
-                  }`}
-                >
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${selectedService === s.name ? 'bg-[#d4af37]/20' : 'bg-[#1c1c1c]'}`}>
-                    <Scissors className={`w-6 h-6 ${selectedService === s.name ? 'text-gold' : 'text-neutral-400'}`} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-white font-medium">{s.name}</p>
-                    <p className="text-xs text-neutral-500 mt-0.5">Zgjidh shërbimin që dëshiron</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gold font-display text-xl tracking-wide">{s.price}</p>
-                  </div>
-                </button>
-              ))}
+              {SERVICES.map((s) => {
+                const checked = selectedServices.includes(s.name);
+                return (
+                  <button
+                    key={s.name}
+                    onClick={() => toggleService(s.name)}
+                    className={`w-full flex items-center gap-4 p-5 rounded-2xl border transition-all text-left active:scale-[0.98] ${
+                      checked
+                        ? 'border-[#d4af37] bg-[#d4af37]/5 gold-glow'
+                        : 'border-[#2a2a2a] bg-[#141414] hover:border-[#d4af37]/50'
+                    }`}
+                  >
+                    <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border-2 transition-all ${checked ? 'bg-[#d4af37] border-[#d4af37]' : 'border-[#3a3a3a]'}`}>
+                      {checked && <Check className="w-4 h-4 text-black" strokeWidth={3} />}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-white font-medium">{s.name}</p>
+                      <p className="text-xs text-neutral-500 mt-0.5">Kliko për të zgjedh</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-gold font-display text-xl tracking-wide">{s.price}</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+
+            {/* Total + Next button */}
+            {selectedServices.length > 0 && (
+              <div className="mt-5 bg-[#141414] border border-[#d4af37]/30 rounded-2xl p-5 animate-fade-in">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-xs text-neutral-500">{selectedServices.length} shërbim{selectedServices.length > 1 ? 'e' : ''} selected</p>
+                    <p className="text-white text-sm mt-1">{selectedServices.join(' + ')}</p>
+                  </div>
+                  <p className="text-gold font-display text-2xl tracking-wide">{totalPrice} ALL</p>
+                </div>
+                <button
+                  onClick={() => setStep('form')}
+                  className="w-full bg-[#d4af37] hover:bg-[#e8c656] text-black font-bold py-3.5 rounded-xl transition-all duration-300 gold-glow active:scale-95 flex items-center justify-center gap-2"
+                >
+                  Vazhdo
+                  <ChevronLeft className="w-5 h-5 rotate-180" />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -289,7 +372,8 @@ export default function BookingFlow({ onBack }: Props) {
                 <Clock className="w-5 h-5 text-gold shrink-0" />
                 <div>
                   <p className="text-xs text-neutral-500">{dateISO && formatDateAL(dateISO)}</p>
-                  <p className="text-white font-medium">Ora {selectedTime} · {selectedService}</p>
+                  <p className="text-white font-medium text-sm">Ora {selectedTime} · {selectedServices.join(', ')}</p>
+                  <p className="text-gold text-xs mt-0.5">Totali: {totalPrice} ALL</p>
                 </div>
               </div>
               <button
@@ -327,11 +411,20 @@ export default function BookingFlow({ onBack }: Props) {
                 <input
                   type="tel"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => { setPhone(e.target.value); setPhoneError(null); }}
+                  onBlur={handlePhoneBlur}
                   placeholder="+355 6X XXX XXXX"
-                  className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white placeholder:text-neutral-600 focus:border-[#d4af37] focus:outline-none transition-colors"
+                  className={`w-full bg-[#0a0a0a] border rounded-xl px-4 py-3 text-white placeholder:text-neutral-600 focus:outline-none transition-colors ${
+                    phoneError ? 'border-red-500/50 focus:border-red-500' : 'border-[#2a2a2a] focus:border-[#d4af37]'
+                  }`}
                   required
                 />
+                {phoneError && (
+                  <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {phoneError}
+                  </p>
+                )}
               </div>
 
               {/* Notes */}
@@ -367,7 +460,7 @@ export default function BookingFlow({ onBack }: Props) {
                     Po konfirmohet...
                   </>
                 ) : (
-                  'Konfirmo Rezervimin'
+                  `Konfirmo Rezervimin — ${totalPrice} ALL`
                 )}
               </button>
             </div>
@@ -392,9 +485,13 @@ export default function BookingFlow({ onBack }: Props) {
                 <span className="text-sm text-neutral-500">Ora</span>
                 <span className="text-gold font-display text-xl tracking-wide">{selectedTime}</span>
               </div>
+              <div className="flex justify-between items-start pb-4 border-b border-[#2a2a2a]">
+                <span className="text-sm text-neutral-500 shrink-0">Shërbimi</span>
+                <span className="text-white font-medium text-right">{selectedServices.join(', ')}</span>
+              </div>
               <div className="flex justify-between items-center pb-4 border-b border-[#2a2a2a]">
-                <span className="text-sm text-neutral-500">Shërbimi</span>
-                <span className="text-white font-medium">{selectedService}</span>
+                <span className="text-sm text-neutral-500">Totali</span>
+                <span className="text-gold font-display text-xl tracking-wide">{totalPrice} ALL</span>
               </div>
               <div className="flex justify-between items-center pb-4 border-b border-[#2a2a2a]">
                 <span className="text-sm text-neutral-500">Emri</span>

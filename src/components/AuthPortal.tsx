@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ArrowLeft, Lock, Mail, Phone, User, Loader2, Scissors, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import PasswordInput from './PasswordInput';
+import { isValidAlbanianPhone } from '@/lib/phone';
 
 type Props = { onBack: () => void; initialMode?: 'signin' | 'signup' };
 type Mode = 'signin' | 'signup' | 'forgot';
@@ -12,6 +14,7 @@ export default function AuthPortal({ onBack, initialMode = 'signin' }: Props) {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,12 +27,19 @@ export default function AuthPortal({ onBack, initialMode = 'signin' }: Props) {
       if (result.error) setError(result.error);
       else setMessage('Hyrja u krye me sukses.');
     } else if (mode === 'signup') {
-      if (!fullName.trim() || !phone.trim()) setError('Emri dhe numri i telefonit janë të detyrueshëm.');
-      else {
-        const result = await signUp({ email, password, fullName, phone });
-        if (result.error) setError(result.error);
-        else setMessage('Llogaria u krijua me sukses.');
+      if (!fullName.trim() || !phone.trim()) {
+        setError('Emri dhe numri i telefonit janë të detyrueshëm.');
+        setLoading(false);
+        return;
       }
+      if (!isValidAlbanianPhone(phone)) {
+        setError('Numri i telefonit nuk është i vlefshëm shqiptar. Psh: +355 69 123 4567');
+        setLoading(false);
+        return;
+      }
+      const result = await signUp({ email, password, fullName, phone });
+      if (result.error) setError(result.error);
+      else setMessage('Llogaria u krijua me sukses.');
     } else {
       const result = await sendPasswordReset(email);
       if (result.error) setError(result.error);
@@ -45,9 +55,33 @@ export default function AuthPortal({ onBack, initialMode = 'signin' }: Props) {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8"><div className="w-16 h-16 rounded-2xl bg-[#d4af37]/10 flex items-center justify-center mb-4"><Scissors className="w-8 h-8 text-gold" /></div><h1 className="font-display text-3xl text-white tracking-wide">BERBER EGLI</h1><p className="text-xs text-neutral-500 tracking-[0.25em] uppercase mt-2">{title}</p></div>
         <form onSubmit={submit} className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-6 space-y-4">
-          {mode === 'signup' && <><Field icon={<User className="w-4 h-4 text-gold" />} label="Emër Mbiemër"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Emri dhe mbiemri" required className={inputClass} /></Field><Field icon={<Phone className="w-4 h-4 text-gold" />} label="Numër Telefoni"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+355 6X XXX XXXX" required className={inputClass} /></Field></>}
+          {mode === 'signup' && <>
+            <Field icon={<User className="w-4 h-4 text-gold" />} label="Emër Mbiemër"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Emri dhe mbiemri" required className={inputClass} /></Field>
+            <Field icon={<Phone className="w-4 h-4 text-gold" />} label="Numër Telefoni">
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => { setPhone(e.target.value); setPhoneError(null); }}
+                onBlur={() => { if (phone && !isValidAlbanianPhone(phone)) setPhoneError('Numër i pavlefshëm shqiptar.'); }}
+                placeholder="+355 6X XXX XXXX"
+                required
+                className={`${inputClass} ${phoneError ? 'border-red-500/50 focus:border-red-500' : ''}`}
+              />
+              {phoneError && <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{phoneError}</p>}
+            </Field>
+          </>}
           <Field icon={<Mail className="w-4 h-4 text-gold" />} label="Email"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@shembull.com" required className={inputClass} /></Field>
-          {mode !== 'forgot' && <Field icon={<Lock className="w-4 h-4 text-gold" />} label="Fjalëkalimi"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Të paktën 10 karaktere" minLength={10} required className={inputClass} /><p className="text-[11px] text-neutral-500 mt-2">Përdorni shkronja të mëdha e të vogla, numër dhe simbol. Mos përdorni fjalëkalim të përdorur më parë.</p></Field>}
+          {mode !== 'forgot' && <Field icon={<Lock className="w-4 h-4 text-gold" />} label="Fjalëkalimi">
+            <PasswordInput
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Të paktën 10 karaktere"
+              minLength={10}
+              required
+              className={inputClass}
+            />
+            <p className="text-[11px] text-neutral-500 mt-2">Përdorni shkronja të mëdha e të vogla, numër dhe simbol. Mos përdorni fjalëkalim të përdorur më parë.</p>
+          </Field>}
           {message && <div className="flex gap-2 text-sm text-green-400 bg-green-400/10 rounded-lg px-3 py-2"><CheckCircle2 className="w-4 h-4 shrink-0" />{message}</div>}
           {error && <div className="flex gap-2 text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}
           <button disabled={loading} className="w-full bg-[#d4af37] hover:bg-[#e8c656] text-black font-bold py-3.5 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">{loading ? <Loader2 className="w-5 h-5 animate-spin" /> : mode === 'signup' ? 'KRIJO LLOGARI' : mode === 'forgot' ? 'DËRGO LIDHJEN' : 'HYR'}</button>

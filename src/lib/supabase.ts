@@ -7,6 +7,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    storageKey: 'berber-egli-auth',
   },
 });
 
@@ -34,16 +37,16 @@ export type Profile = {
   updated_at: string;
 };
 
-export const SERVICES: { name: ServiceType; price: string }[] = [
-  { name: 'Qethje', price: '400 ALL' },
-  { name: 'Rruajtje', price: '300 ALL' },
-  { name: 'Rruajtje Makinë', price: '100 ALL' },
-  { name: 'Lyerje Mjekre', price: '300 ALL' },
-  { name: 'Larje Koke', price: '100 ALL' },
-  { name: 'Trajtim me Avull', price: '1000 ALL' },
-  { name: 'Black Mask', price: '300 ALL' },
-  { name: 'Scrub Mask', price: '200 ALL' },
-  { name: 'Mask Dylli', price: '200 ALL' },
+export const SERVICES: { name: ServiceType; price: string; priceValue: number }[] = [
+  { name: 'Qethje', price: '400 ALL', priceValue: 400 },
+  { name: 'Rruajtje', price: '300 ALL', priceValue: 300 },
+  { name: 'Rruajtje Makinë', price: '100 ALL', priceValue: 100 },
+  { name: 'Lyerje Mjekre', price: '300 ALL', priceValue: 300 },
+  { name: 'Larje Koke', price: '100 ALL', priceValue: 100 },
+  { name: 'Trajtim me Avull', price: '1000 ALL', priceValue: 1000 },
+  { name: 'Black Mask', price: '300 ALL', priceValue: 300 },
+  { name: 'Scrub Mask', price: '200 ALL', priceValue: 200 },
+  { name: 'Mask Dylli', price: '200 ALL', priceValue: 200 },
 ];
 
 export type Booking = {

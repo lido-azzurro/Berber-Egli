@@ -3,12 +3,16 @@ import {
   Scissors, LogOut, Bell, Plus, Trash2, X, Calendar as CalIcon,
   Clock, Phone, User, FileText, Loader2, CalendarDays, TrendingUp,
   CheckCircle2, Circle, Filter, Settings, ShieldCheck, CalendarPlus, KeyRound,
+  BellRing, Check,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAllBookings, useNewBookingsCount } from '@/hooks/useBookings';
 import { ALL_SLOTS } from '@/lib/slots';
 import { supabase, SERVICES, type Booking, type ServiceType, type BookingStatus, type Profile } from '@/lib/supabase';
 import CalendarPicker from './CalendarPicker';
+import PasswordInput from './PasswordInput';
+import { isValidAlbanianPhone } from '@/lib/phone';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 const MONTHS_AL = [
   'Janar', 'Shkurt', 'Mars', 'Prill', 'Maj', 'Qershor',
@@ -38,7 +42,16 @@ type Props = {
 export default function AdminDashboard({ onBackHome }: Props) {
   const { signOut, session, profile, updatePassword, refreshProfile } = useAuth();
   const { bookings, loading, refresh } = useAllBookings();
-  const newCount = useNewBookingsCount();
+  const { count: newCount, markAllSeen } = useNewBookingsCount();
+  const { permission, requestPermission, registering } = usePushNotifications();
+  const [showPushPrompt, setShowPushPrompt] = useState(false);
+
+  useEffect(() => {
+    if (permission === 'default' && session) {
+      const dismissed = localStorage.getItem('push-prompt-dismissed');
+      if (!dismissed) setShowPushPrompt(true);
+    }
+  }, [permission, session]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Booking | null>(null);
@@ -66,8 +79,8 @@ export default function AdminDashboard({ onBackHome }: Props) {
     [bookings, filterDate]
   );
 
-  const markAllSeen = async () => {
-    await supabase.from('bookings').update({ seen_by_admin: true }).eq('seen_by_admin', false);
+  const handleMarkAllSeen = async () => {
+    await markAllSeen();
     refresh();
   };
 
@@ -108,7 +121,7 @@ export default function AdminDashboard({ onBackHome }: Props) {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={markAllSeen}
+              onClick={handleMarkAllSeen}
               className="relative w-10 h-10 rounded-full flex items-center justify-center text-neutral-400 hover:text-gold hover:bg-[#1c1c1c] transition-colors"
               title="Shëno si të lexuara"
             >
@@ -172,7 +185,7 @@ export default function AdminDashboard({ onBackHome }: Props) {
                 +{newCount} Rezervim{newCount > 1 ? 'e' : ''} i ri{newCount > 1 ? '' : ''}!
               </span>
             </div>
-            <button onClick={markAllSeen} className="text-xs text-gold hover:underline">Shëno si të lexuara</button>
+            <button onClick={handleMarkAllSeen} className="text-xs text-gold hover:underline">Shëno si të lexuara</button>
           </div>
         )}
 
@@ -246,6 +259,41 @@ export default function AdminDashboard({ onBackHome }: Props) {
           </div>
         )}
       </main>
+
+      {/* Push notification prompt */}
+      {showPushPrompt && (
+        <div className="fixed bottom-4 left-4 right-4 z-40 max-w-md mx-auto bg-[#141414] border border-[#d4af37]/40 rounded-2xl p-4 animate-fade-in-up shadow-lg">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#d4af37]/10 flex items-center justify-center shrink-0">
+              <BellRing className="w-5 h-5 text-gold" />
+            </div>
+            <div className="flex-1">
+              <p className="text-white text-sm font-medium">Njoftime Push për celularin</p>
+              <p className="text-xs text-neutral-400 mt-1">Lejo njoftimet për të marrë alarm në telefon sa herë vjen një rezervim i ri.</p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={async () => {
+                    const ok = await requestPermission();
+                    setShowPushPrompt(false);
+                    if (!ok) localStorage.setItem('push-prompt-dismissed', '1');
+                  }}
+                  disabled={registering}
+                  className="bg-[#d4af37] text-black text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {registering ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                  Lejo
+                </button>
+                <button
+                  onClick={() => { setShowPushPrompt(false); localStorage.setItem('push-prompt-dismissed', '1'); }}
+                  className="bg-[#1c1c1c] text-neutral-400 text-xs px-4 py-2 rounded-lg hover:text-white"
+                >
+                  Jo tani
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add modal */}
       {showAddModal && (
@@ -531,7 +579,7 @@ function AdminSettings({ sessionId, profile, updatePassword, refreshProfile, onC
   return <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-0 sm:px-5" onClick={onClose}><div className="bg-[#141414] border border-[#2a2a2a] rounded-t-3xl sm:rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-hide" onClick={(event) => event.stopPropagation()}>
     <div className="sticky top-0 z-10 bg-[#141414] border-b border-[#2a2a2a] px-5 py-4 flex items-center justify-between"><div className="flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-gold" /><h2 className="font-display text-2xl text-white">CILËSIMET</h2></div><button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button></div>
     <div className="p-5 space-y-5">
-      <section className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4"><h3 className="font-display text-xl text-white">SIGURIA E ADMINIT</h3><p className="text-xs text-neutral-500">Email primar: <span className="text-white">{profile.id ? 'berberegli@gmail.com' : '—'}</span></p><input type="password" minLength={6} required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Fjalëkalimi aktual" className="w-full bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><form onSubmit={savePassword} className="flex gap-2"><input type="password" minLength={6} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Fjalëkalim i ri" className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#d4af37] text-black font-bold px-4 rounded-xl flex items-center gap-2"><KeyRound className="w-4 h-4" />Ndrysho</button></form><form onSubmit={saveBackupEmail} className="flex gap-2"><input type="email" required value={backupEmail} onChange={(event) => setBackupEmail(event.target.value)} className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#1c1c1c] text-white px-4 rounded-xl">Ruaj rezervë</button></form><form onSubmit={requestEmailChange} className="flex gap-2"><input type="email" required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} placeholder="Email i ri primar" className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#1c1c1c] text-white px-4 rounded-xl">Kërko ndryshim</button></form></section>
+      <section className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4"><h3 className="font-display text-xl text-white">SIGURIA E ADMINIT</h3><p className="text-xs text-neutral-500">Email primar: <span className="text-white">{profile.id ? 'berberegli@gmail.com' : '—'}</span></p><PasswordInput minLength={6} required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Fjalëkalimi aktual" containerClassName="w-full" className="w-full bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><form onSubmit={savePassword} className="flex gap-2"><PasswordInput minLength={6} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Fjalëkalim i ri" containerClassName="flex-1" className="w-full bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#d4af37] text-black font-bold px-4 rounded-xl flex items-center gap-2"><KeyRound className="w-4 h-4" />Ndrysho</button></form><form onSubmit={saveBackupEmail} className="flex gap-2"><input type="email" required value={backupEmail} onChange={(event) => setBackupEmail(event.target.value)} className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#1c1c1c] text-white px-4 rounded-xl">Ruaj rezervë</button></form><form onSubmit={requestEmailChange} className="flex gap-2"><input type="email" required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} placeholder="Email i ri primar" className="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white focus:border-[#d4af37] focus:outline-none" /><button className="bg-[#1c1c1c] text-white px-4 rounded-xl">Kërko ndryshim</button></form></section>
       <section className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4"><h3 className="font-display text-xl text-white">DITË PUSHIMI SHTESË</h3><form onSubmit={addDayOff} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2"><input type="date" value={offDate} onChange={(event) => setOffDate(event.target.value)} required className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white" /><input value={offReason} onChange={(event) => setOffReason(event.target.value)} placeholder="Arsyeja (opsionale)" className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white" /><button className="bg-[#d4af37] text-black font-bold px-4 rounded-xl flex items-center justify-center gap-2"><CalendarPlus className="w-4 h-4" />Shto</button></form><div className="space-y-2">{daysOff.map((day) => <div key={day.id} className="flex justify-between text-sm"><span className="text-neutral-300">{formatDateAL(day.off_date)} {day.reason && `· ${day.reason}`}</span><button onClick={() => void removeDayOff(day.id)} className="text-red-400 hover:underline">Hiq</button></div>)}</div></section>
       <section className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-2xl p-4 space-y-4"><h3 className="font-display text-xl text-white">ORARE SHTESË</h3><form onSubmit={addExtraSlot} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2"><input type="date" value={extraDate} onChange={(event) => setExtraDate(event.target.value)} required className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white" /><input type="time" value={extraTime} onChange={(event) => setExtraTime(event.target.value)} required className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white" /><button className="bg-[#d4af37] text-black font-bold px-4 rounded-xl">Shto</button></form><div className="space-y-2">{extraSlots.map((slot) => <div key={slot.id} className="flex justify-between text-sm"><span className="text-neutral-300">{formatDateAL(slot.slot_date)} · {slot.slot_time}</span><button onClick={() => void removeExtraSlot(slot.id)} className="text-red-400 hover:underline">Hiq</button></div>)}</div></section>
       {message && <p className="text-sm text-gold">{message}</p>}
@@ -566,6 +614,10 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     e.preventDefault();
     if (!dateISO || !slotTime || !fullName.trim() || !phone.trim()) {
       setError('Plotësoni të gjitha fushat e detyrueshme.');
+      return;
+    }
+    if (!isValidAlbanianPhone(phone)) {
+      setError('Numri i telefonit nuk është i vlefshëm shqiptar.');
       return;
     }
     setSubmitting(true);
