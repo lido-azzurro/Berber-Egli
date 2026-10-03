@@ -1,5 +1,20 @@
-const CACHE_NAME = 'berber-egli-v1';
+const CACHE_NAME = 'berber-egli-v2';
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.webmanifest'];
+
+// Inline SVG badge — gold "E" on dark background, used as notification badge/icon
+const NOTIFICATION_ICON = 'data:image/svg+xml;base64,' + btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">' +
+  '<rect width="192" height="192" fill="#0a0a0a"/>' +
+  '<text x="50%" y="50%" font-family="sans-serif" font-size="96" fill="#d4af37" ' +
+  'text-anchor="middle" dominant-baseline="central">E</text></svg>'
+);
+
+const NOTIFICATION_BADGE = 'data:image/svg+xml;base64,' + btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">' +
+  '<circle cx="48" cy="48" r="40" fill="#d4af37"/>' +
+  '<text x="50%" y="50%" font-family="sans-serif" font-size="48" fill="#0a0a0a" ' +
+  'text-anchor="middle" dominant-baseline="central">E</text></svg>'
+);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -37,25 +52,43 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let data = { title: 'Rezervim i Ri', body: 'Keni një rezervim të ri' };
+  let data = {
+    title: 'Rezervim i Ri',
+    body: 'Keni një rezervim të ri',
+    url: '/',
+    tag: 'new-booking',
+    test: false,
+  };
+
   try {
-    if (event.data) data = event.data.json();
+    if (event.data) {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    }
   } catch {
     if (event.data) data.body = event.data.text();
   }
 
   const options = {
     body: data.body,
-    icon: data.icon || undefined,
-    badge: data.badge || undefined,
-    vibrate: [200, 100, 200],
-    data: { url: data.url || '/' },
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+    image: NOTIFICATION_ICON,
+    vibrate: [300, 150, 300, 150, 300],
+    data: {
+      url: data.url || '/',
+      test: data.test,
+    },
     requireInteraction: true,
-    tag: 'new-booking',
+    tag: data.tag || 'new-booking',
     renotify: true,
+    priority: 'high',
+    silent: false,
   };
 
-  event.waitUntil(self.registration.showNotification(data.title, options));
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -64,7 +97,7 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes(url) && 'focus' in client) return client.focus();
+        if ('focus' in client) return client.focus();
       }
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })

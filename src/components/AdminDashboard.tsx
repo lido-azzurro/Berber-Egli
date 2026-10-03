@@ -3,7 +3,7 @@ import {
   Scissors, LogOut, Bell, Plus, Trash2, X, Calendar as CalIcon,
   Clock, Phone, User, FileText, Loader2, CalendarDays, TrendingUp,
   CheckCircle2, Circle, Filter, Settings, ShieldCheck, CalendarPlus, KeyRound,
-  BellRing, Check,
+  BellRing, Check, Send,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAllBookings, useNewBookingsCount } from '@/hooks/useBookings';
@@ -43,8 +43,10 @@ export default function AdminDashboard({ onBackHome }: Props) {
   const { signOut, session, profile, updatePassword, refreshProfile } = useAuth();
   const { bookings, loading, refresh } = useAllBookings();
   const { count: newCount, markAllSeen } = useNewBookingsCount();
-  const { permission, requestPermission, registering } = usePushNotifications();
+  const { permission, requestPermission, registering, sendTestNotification } = usePushNotifications();
   const [showPushPrompt, setShowPushPrompt] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (permission === 'default' && session) {
@@ -175,6 +177,37 @@ export default function AdminDashboard({ onBackHome }: Props) {
             <p className="text-[11px] text-neutral-500">Të reja</p>
           </div>
         </div>
+
+        {/* Push notification status + test button */}
+        {permission === 'granted' && (
+          <div className="flex items-center justify-between bg-[#141414] border border-[#2a2a2a] rounded-xl px-4 py-3 mb-5">
+            <div className="flex items-center gap-2">
+              <BellRing className="w-4 h-4 text-gold shrink-0" />
+              <span className="text-sm text-neutral-300">Njoftimet Push janë aktiv</span>
+            </div>
+            <button
+              onClick={async () => {
+                setTestingPush(true);
+                setTestResult(null);
+                const result = await sendTestNotification();
+                setTestResult(result.message);
+                setTestingPush(false);
+                setTimeout(() => setTestResult(null), 5000);
+              }}
+              disabled={testingPush}
+              className="flex items-center gap-1.5 text-xs font-bold text-gold bg-[#d4af37]/10 hover:bg-[#d4af37]/20 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {testingPush ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Test Njoftimin
+            </button>
+          </div>
+        )}
+
+        {testResult && (
+          <div className={`flex items-center gap-2 text-sm rounded-lg px-3 py-2 mb-5 animate-fade-in ${testResult.includes('sent') ? 'text-green-400 bg-green-400/10' : 'text-amber-400 bg-amber-400/10'}`}>
+            {testResult}
+          </div>
+        )}
 
         {/* New bookings alert */}
         {newCount > 0 && (
