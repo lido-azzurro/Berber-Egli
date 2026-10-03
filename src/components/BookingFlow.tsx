@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, Clock, User, Phone, FileText, Check, Loader2, AlertCircle, Calendar as CalIcon, Scissors, CheckCircle2 } from 'lucide-react';
 import CalendarPicker from './CalendarPicker';
-import { ALL_SLOTS, WORKING_LABEL_AL, type SlotKind } from '@/lib/slots';
+import { ALL_SLOTS, WORKING_LABEL_AL, type SlotKind, getSlotsForDate, getSlotLabels, isFriday } from '@/lib/slots';
 import { useBookedSlots } from '@/hooks/useBookings';
 import { supabase, SERVICES, type ServiceType } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { isSlotInPast } from '@/lib/timeFilter';
-import { isValidAlbanianPhone, formatAlbanianPhone } from '@/lib/phone';
+import { isValidAlbanianPhone } from '@/lib/phone';
 
 const MONTHS_AL = [
   'Janar', 'Shkurt', 'Mars', 'Prill', 'Maj', 'Qershor',
@@ -174,8 +174,11 @@ export default function BookingFlow({ onBack }: Props) {
     else onBack();
   };
 
+  const daySlots = dateISO ? getSlotsForDate(dateISO) : ALL_SLOTS;
+  const slotLabels = dateISO ? getSlotLabels(dateISO) : { morning: '09:00 — 14:30', break: '15:00 — 17:00', evening: '17:00 — 21:30' };
+
   const renderSlots = (kind: SlotKind) => {
-    const slots = ALL_SLOTS.filter((s) => s.kind === kind);
+    const slots = daySlots.filter((s) => s.kind === kind);
     if (slots.length === 0) return null;
     return (
       <div className="mb-6">
@@ -184,10 +187,10 @@ export default function BookingFlow({ onBack }: Props) {
             {WORKING_LABEL_AL[kind]}
           </span>
           {kind === 'break' && (
-            <span className="text-[10px] text-neutral-600">— Pushim</span>
+            <span className="text-[10px] text-neutral-600">— {slotLabels.break}</span>
           )}
-          {kind === 'morning' && <span className="text-[10px] text-neutral-500">09:00 — 15:00</span>}
-          {kind === 'evening' && <span className="text-[10px] text-neutral-500">17:30 — 22:00</span>}
+          {kind === 'morning' && <span className="text-[10px] text-neutral-500">{slotLabels.morning}</span>}
+          {kind === 'evening' && <span className="text-[10px] text-neutral-500">{slotLabels.evening}</span>}
         </div>
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
           {slots.map((slot) => {
@@ -266,10 +269,13 @@ export default function BookingFlow({ onBack }: Props) {
           <div className="animate-fade-in">
             <div className="bg-[#141414] border border-[#2a2a2a] rounded-2xl p-4 mb-5 flex items-center gap-3">
               <CalIcon className="w-5 h-5 text-gold shrink-0" />
-              <div>
+              <div className="flex-1">
                 <p className="text-xs text-neutral-500">Data e zgjedhur</p>
                 <p className="text-white font-medium">{formatDateAL(dateISO)}</p>
               </div>
+              {dateISO && isFriday(dateISO) && (
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full uppercase tracking-wider">E Premte</span>
+              )}
             </div>
 
             {loading ? (

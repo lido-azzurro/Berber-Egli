@@ -45,6 +45,35 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+async function ensureSubscription(): Promise<PushSubscription | null> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+
+  const vapidPublicKey = await fetchVapidPublicKey();
+  if (!vapidPublicKey) return null;
+
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+  }
+
+  const p256dh = sub.getKey('p256dh');
+  const auth = sub.getKey('auth');
+  if (p256dh && auth) {
+    await supabase.from('push_subscriptions').upsert({
+      endpoint: sub.endpoint,
+      p256dh: btoa(String.fromCharCode(...new Uint8Array(p256dh))),
+      auth: btoa(String.fromCharCode(...new Uint8Array(auth))),
+    });
+  }
+
+  return sub;
+}
+
 export type PushPermissionState = 'unsupported' | 'default' | 'granted' | 'denied';
 
 export function usePushNotifications() {
@@ -57,10 +86,11 @@ export function usePushNotifications() {
       setPermission('unsupported');
       return;
     }
+
     if (Notification.permission === 'granted') {
       setPermission('granted');
-      void navigator.serviceWorker.ready.then(async (reg) => {
-        const sub = await reg.pushManager.getSubscription();
+      // Auto-create subscription if permission already granted but no subscription exists
+      void ensureSubscription().then((sub) => {
         setSubscription(sub);
       });
     } else if (Notification.permission === 'denied') {
@@ -75,13 +105,6 @@ export function usePushNotifications() {
     }
     setRegistering(true);
     try {
-      const vapidPublicKey = await fetchVapidPublicKey();
-      if (!vapidPublicKey) {
-        setRegistering(false);
-        return false;
-      }
-
-      const reg = await navigator.serviceWorker.ready;
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
         setPermission('denied');
@@ -90,29 +113,11 @@ export function usePushNotifications() {
       }
       setPermission('granted');
 
-      let sub = await reg.pushManager.getSubscription();
-
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
-      }
-
+      const sub = await ensureSubscription();
       setSubscription(sub);
 
-      const p256dh = sub.getKey('p256dh');
-      const auth = sub.getKey('auth');
-      if (p256dh && auth) {
-        await supabase.from('push_subscriptions').upsert({
-          endpoint: sub.endpoint,
-          p256dh: btoa(String.fromCharCode(...new Uint8Array(p256dh))),
-          auth: btoa(String.fromCharCode(...new Uint8Array(auth))),
-        });
-      }
-
       setRegistering(false);
-      return true;
+      return sub !== null;
     } catch {
       setRegistering(false);
       return false;
@@ -121,6 +126,15 @@ export function usePushNotifications() {
 
   const sendTestNotification = useCallback(async (): Promise<{ success: boolean; message: string }> => {
     try {
+      // Ensure we have a subscription before sending test
+      if (!subscription) {
+        const sub = await ensureSubscription();
+        setSubscription(sub);
+        if (!sub) {
+          return { success: false, message: 'Nuk u krijua abonimi push. Lejo njoftimet së pari.' };
+        }
+      }
+
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push-notification`;
       const res = await fetch(apiUrl, {
         method: 'POST',
@@ -132,14 +146,14 @@ export function usePushNotifications() {
       });
       const data = await res.json();
       if (data.sent > 0) {
-        return { success: true, message: `Push notification sent (${data.sent}/${data.total}).` };
+        return { success: true, message: `Push notification u dërgua (${data.sent}/${data.total}).` };
       }
-      const reason = data.errors?.[0] ?? 'No subscriptions registered.';
-      return { success: false, message: `Not sent: ${reason}` };
+      const reason = data.errors?.[0] ?? 'Nuk ka abonime të regjistruara.';
+      return { success: false, message: `Nuk u dërgua: ${reason}` };
     } catch {
-      return { success: false, message: 'Could not reach notification server.' };
+      return { success: false, message: 'Nuk u arrit serveri i njoftimeve.' };
     }
-  }, []);
+  }, [subscription]);
 
   return { permission, subscription, registering, requestPermission, sendTestNotification };
 }

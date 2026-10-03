@@ -170,16 +170,20 @@ export default function HomePage({ onReservo, onAdminClick, onAccount, accountLa
               </div>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between items-center pb-3 border-b border-[#2a2a2a]">
-                  <span className="text-neutral-400">Mëngjes</span>
-                  <span className="text-white font-medium">09:00 — 15:00</span>
+                  <span className="text-neutral-400">Mëngjes (E Hënë — E Enjte, E Shtunë)</span>
+                  <span className="text-white font-medium">09:00 — 14:30</span>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b border-[#2a2a2a]">
+                  <span className="text-neutral-400">Mëngjes (E Premte)</span>
+                  <span className="text-amber-400 font-medium">09:00 — 12:30</span>
                 </div>
                 <div className="flex justify-between items-center pb-3 border-b border-[#2a2a2a]">
                   <span className="text-neutral-500">Pushim</span>
-                  <span className="text-neutral-500">15:00 — 17:30</span>
+                  <span className="text-neutral-500">13:00 / 15:00 — 17:00</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-neutral-400">Mbrëmje</span>
-                  <span className="text-white font-medium">17:30 — 22:00</span>
+                  <span className="text-white font-medium">17:00 — 21:30</span>
                 </div>
               </div>
             </div>

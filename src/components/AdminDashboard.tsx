@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAllBookings, useNewBookingsCount } from '@/hooks/useBookings';
-import { ALL_SLOTS } from '@/lib/slots';
+import { ALL_SLOTS, getSlotsForDate, getSlotLabels, isFriday, buildOvertimeSlots } from '@/lib/slots';
 import { supabase, SERVICES, type Booking, type ServiceType, type BookingStatus, type Profile } from '@/lib/supabase';
 import CalendarPicker from './CalendarPicker';
 import PasswordInput from './PasswordInput';
@@ -624,15 +624,32 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [step, setStep] = useState<'date' | 'details'>('date');
   const [dateISO, setDateISO] = useState<string | null>(null);
   const [slotTime, setSlotTime] = useState<string | null>(null);
-  const [service, setService] = useState<ServiceType>('Qethje');
+  const [selectedServices, setSelectedServices] = useState<ServiceType[]>([]);
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [source, setSource] = useState<'walkin' | 'phone'>('walkin');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOvertime, setShowOvertime] = useState(false);
+  const [overtimeSlots, setOvertimeSlots] = useState<string[]>([]);
 
   const [bookedSet, setBookedSet] = useState<Set<string>>(new Set());
+
+  const daySlots = dateISO ? getSlotsForDate(dateISO) : ALL_SLOTS;
+  const slotLabels = dateISO ? getSlotLabels(dateISO) : { morning: '09:00 — 14:30', break: '15:00 — 17:00', evening: '17:00 — 21:30' };
+  const fridayLabel = dateISO ? isFriday(dateISO) : false;
+
+  const totalPrice = selectedServices.reduce((sum, name) => {
+    const svc = SERVICES.find((s) => s.name === name);
+    return sum + (svc?.priceValue ?? 0);
+  }, 0);
+
+  const toggleService = (name: ServiceType) => {
+    setSelectedServices((prev) =>
+      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+    );
+  };
 
   const handleDateSelect = async (iso: string) => {
     setDateISO(iso);
@@ -641,28 +658,99 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     const set = new Set<string>();
     if (data) for (const row of data as { slot_time: string }[]) set.add(row.slot_time);
     setBookedSet(set);
+    // Load existing overtime slots from shop_extra_slots
+    const { data: extraData } = await supabase.from('shop_extra_slots').select('slot_time').eq('slot_date', iso);
+    const otSlots = ((extraData as { slot_time: string }[] | null)?.map((r) => r.slot_time) ?? []).filter((t) => t >= '22:00');
+    setOvertimeSlots(otSlots);
+  };
+
+  const addOvertimeSlot = async (time: string) => {
+    if (!dateISO) return;
+    const { error: otError } = await supabase.from('shop_extra_slots').insert({ slot_date: dateISO, slot_time: time });
+    if (!otError) {
+      setOvertimeSlots((prev) => [...prev, time].sort());
+    }
+  };
+
+  const removeOvertimeSlot = async (time: string) => {
+    if (!dateISO) return;
+    await supabase.from('shop_extra_slots').delete().eq('slot_date', dateISO).eq('slot_time', time);
+    setOvertimeSlots((prev) => prev.filter((t) => t !== time));
+  };
+
+  const renderSlotGroup = (kind: 'morning' | 'break' | 'evening') => {
+    const slots = daySlots.filter((s) => s.kind === kind);
+    if (slots.length === 0) return null;
+    const isBreak = kind === 'break';
+    const label = isBreak ? 'Pushim' : kind === 'morning' ? `Mëngjes · ${slotLabels.morning}` : `Mbrëmje · ${slotLabels.evening}`;
+
+    return (
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`text-xs font-semibold tracking-[0.15em] uppercase ${isBreak ? 'text-neutral-600' : 'text-gold'}`}>
+            {label}
+          </span>
+          {isBreak && <span className="text-[10px] text-neutral-600">— {slotLabels.break}</span>}
+        </div>
+        <div className="grid grid-cols-4 gap-1.5">
+          {slots.map((s) => {
+            const booked = bookedSet.has(s.time);
+            return (
+              <button
+                key={s.time}
+                type="button"
+                disabled={isBreak || booked}
+                onClick={() => setSlotTime(s.time)}
+                className={`py-2 rounded-lg text-xs font-medium transition-all border ${
+                  slotTime === s.time
+                    ? 'bg-[#d4af37] text-black border-[#d4af37]'
+                    : isBreak
+                      ? 'bg-[#0d0d0d] border-[#1a1a1a] text-neutral-700 cursor-not-allowed'
+                      : booked
+                        ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-700 cursor-not-allowed line-through'
+                        : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37]'
+                }`}
+              >
+                {s.time}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dateISO || !slotTime || !fullName.trim() || !phone.trim()) {
-      setError('Plotësoni të gjitha fushat e detyrueshme.');
+    if (!dateISO || !slotTime || !fullName.trim()) {
+      setError('Emri dhe ora janë të detyrueshme.');
       return;
     }
-    if (!isValidAlbanianPhone(phone)) {
+    if (selectedServices.length === 0) {
+      setError('Zgjidh të paktën një shërbim.');
+      return;
+    }
+    if (phone.trim() && !isValidAlbanianPhone(phone)) {
       setError('Numri i telefonit nuk është i vlefshëm shqiptar.');
       return;
     }
     setSubmitting(true);
     setError(null);
+
+    const primaryService = selectedServices[0];
+    const serviceList = selectedServices.join(', ');
+    const notesWithServices = notes.trim()
+      ? `${serviceList} — ${notes.trim()}`
+      : serviceList;
+
     const { error: insertError } = await supabase.from('bookings').insert({
       booking_date: dateISO,
       slot_time: slotTime,
       client_full_name: fullName.trim(),
-      client_phone: phone.trim(),
-      notes: notes.trim() || null,
+      client_phone: phone.trim() || null,
+      notes: notesWithServices,
       source,
-      service,
+      service: primaryService,
       seen_by_admin: true,
     });
     setSubmitting(false);
@@ -676,6 +764,8 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     }
     onDone();
   };
+
+  const availableOvertimeSlots = buildOvertimeSlots(overtimeSlots);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-0 sm:px-5 animate-fade-in" onClick={onClose}>
@@ -698,54 +788,121 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Date + slot summary */}
               <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl p-4">
-                <p className="text-xs text-neutral-500 mb-1">Data</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-neutral-500">Data</p>
+                  {fridayLabel && <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">E Premte</span>}
+                </div>
                 <p className="text-white font-medium mb-3">{dateISO && formatDateAL(dateISO)}</p>
 
                 <p className="text-xs text-neutral-500 mb-2">Zgjidh orën</p>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {ALL_SLOTS.filter((s) => s.kind !== 'break').map((s) => {
-                    const booked = bookedSet.has(s.time);
+                {renderSlotGroup('morning')}
+                {renderSlotGroup('break')}
+                {renderSlotGroup('evening')}
+
+                {/* Overtime slots */}
+                {overtimeSlots.length > 0 && (
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold tracking-[0.15em] uppercase text-purple-400">Overtime</span>
+                      <span className="text-[10px] text-neutral-500">— Shtuar nga admini</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {overtimeSlots.sort().map((time) => {
+                        const booked = bookedSet.has(time);
+                        return (
+                          <div key={time} className="relative">
+                            <button
+                              key={time}
+                              type="button"
+                              disabled={booked}
+                              onClick={() => setSlotTime(time)}
+                              className={`w-full py-2 rounded-lg text-xs font-medium transition-all border ${
+                                slotTime === time
+                                  ? 'bg-[#d4af37] text-black border-[#d4af37]'
+                                  : booked
+                                    ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-700 cursor-not-allowed line-through'
+                                    : 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:border-purple-400'
+                              }`}
+                            >
+                              {time}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeOvertimeSlot(time)}
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[8px] hover:bg-red-400"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Add overtime button */}
+                {availableOvertimeSlots.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOvertime((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 px-3 py-2 rounded-lg transition-colors mt-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Shto orar overtime
+                  </button>
+                )}
+
+                {showOvertime && availableOvertimeSlots.length > 0 && (
+                  <div className="mt-2 animate-fade-in">
+                    <p className="text-[10px] text-neutral-500 mb-2">Kliko për të shtuar orë shtesë</p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {availableOvertimeSlots.map((time) => (
+                        <button
+                          key={time}
+                          type="button"
+                          onClick={() => addOvertimeSlot(time)}
+                          className="py-2 rounded-lg text-xs font-medium border bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-purple-400 hover:text-purple-300 transition-colors"
+                        >
+                          {time}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Service — multi-select */}
+              <div>
+                <p className="text-sm font-medium text-neutral-300 mb-2">Shërbimi (zgjidh një ose disa)</p>
+                <div className="space-y-2">
+                  {SERVICES.map((s) => {
+                    const checked = selectedServices.includes(s.name);
                     return (
                       <button
-                        key={s.time}
+                        key={s.name}
                         type="button"
-                        disabled={booked}
-                        onClick={() => setSlotTime(s.time)}
-                        className={`py-2 rounded-lg text-xs font-medium transition-all border ${
-                          slotTime === s.time
-                            ? 'bg-[#d4af37] text-black border-[#d4af37]'
-                            : booked
-                              ? 'bg-[#1a1a1a] border-[#2a2a2a] text-neutral-700 cursor-not-allowed line-through'
-                              : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-200 hover:border-[#d4af37]'
+                        onClick={() => toggleService(s.name)}
+                        className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-medium transition-colors border ${
+                          checked
+                            ? 'bg-[#d4af37]/10 border-[#d4af37] text-gold'
+                            : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-400 hover:text-white'
                         }`}
                       >
-                        {s.time}
+                        <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border-2 transition-all ${checked ? 'bg-[#d4af37] border-[#d4af37]' : 'border-[#3a3a3a]'}`}>
+                          {checked && <Check className="w-3.5 h-3.5 text-black" strokeWidth={3} />}
+                        </div>
+                        <span className="flex-1 text-left">{s.name}</span>
+                        <span className="text-xs">{s.price}</span>
                       </button>
                     );
                   })}
                 </div>
-              </div>
-
-              {/* Service */}
-              <div>
-                <p className="text-sm font-medium text-neutral-300 mb-2">Shërbimi</p>
-                <div className="space-y-2">
-                  {SERVICES.map((s) => (
-                    <button
-                      key={s.name}
-                      type="button"
-                      onClick={() => setService(s.name)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl text-sm font-medium transition-colors border ${
-                        service === s.name
-                          ? 'bg-[#d4af37]/10 border-[#d4af37] text-gold'
-                          : 'bg-[#1c1c1c] border-[#2a2a2a] text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>{s.name}</span>
-                      <span className="text-xs">{s.price}</span>
-                    </button>
-                  ))}
-                </div>
+                {selectedServices.length > 0 && (
+                  <div className="mt-2 flex items-center justify-between bg-[#0a0a0a] border border-[#d4af37]/20 rounded-lg px-3 py-2">
+                    <span className="text-xs text-neutral-400">{selectedServices.join(' + ')}</span>
+                    <span className="text-gold font-display text-lg tracking-wide">{totalPrice} ALL</span>
+                  </div>
+                )}
               </div>
 
               {/* Source */}
@@ -786,11 +943,11 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
                 />
               </div>
 
-              {/* Phone */}
+              {/* Phone — optional */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-neutral-300 mb-2">
                   <Phone className="w-4 h-4 text-gold" />
-                  Numër Telefoni
+                  Numër Telefoni <span className="text-neutral-600 text-xs font-normal">(opsionale)</span>
                 </label>
                 <input
                   type="tel"
@@ -798,7 +955,6 @@ function AddBookingModal({ onClose, onDone }: { onClose: () => void; onDone: () 
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+355 6X XXX XXXX"
                   className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white placeholder:text-neutral-600 focus:border-[#d4af37] focus:outline-none transition-colors"
-                  required
                 />
               </div>
 
