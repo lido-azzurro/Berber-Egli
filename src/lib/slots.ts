@@ -27,7 +27,7 @@ export function isFriday(dateISO: string): boolean {
 
 export function getSlotsForDate(dateISO: string): Slot[] {
   const friday = isFriday(dateISO);
-  const morningEnd = friday ? '12:30' : '14:30';
+  const morningEnd = friday ? '13:00' : '15:00';
   const breakStart = friday ? '13:00' : '15:00';
 
   const morning = buildSlots('09:00', morningEnd);
@@ -42,7 +42,7 @@ export function getSlotsForDate(dateISO: string): Slot[] {
 }
 
 // Static defaults for backward compatibility (non-Friday)
-export const MORNING_SLOTS = buildSlots('09:00', '14:30');
+export const MORNING_SLOTS = buildSlots('09:00', '15:00');
 export const EVENING_SLOTS = buildSlots('17:00', '21:30');
 export const BREAK_SLOTS = buildSlots('15:00', '17:00');
 
